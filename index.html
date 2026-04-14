@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>115年品管土建題庫</title>
+<title>115年品管土建題庫 (2689題)</title>
 <style>
 /* ===== Reset & Base ===== */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -254,10 +254,29 @@ body {
   margin-bottom: 16px;
   flex-wrap: wrap;
 }
-.nav-bar .page-info {
+/* 浮動導航列：固定在畫面底部跟隨捲動 */
+.nav-float {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  position: sticky;
+  bottom: 0;
+  z-index: 90;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  box-shadow: 0 -2px 8px rgba(0,0,0,0.06);
+  padding: 10px 16px;
+  margin: 0 -16px;
+  margin-top: 8px;
+}
+.nav-bar .page-info,
+.nav-float .page-info {
   font-size: 14px;
   color: var(--text-secondary);
   white-space: nowrap;
+  text-align: center;
+  flex: 1;
 }
 /* ===== Score Panel ===== */
 .score-panel {
@@ -356,7 +375,7 @@ body {
   .header-inner { gap: 6px; }
   .app-title { font-size: 15px; }
   .mode-tab { padding: 5px 10px; font-size: 13px; }
-  .main { padding: 12px; }
+  .main { padding: 12px; padding-bottom: 60px; }
   .question-card { padding: 16px; }
   .question-text { font-size: 15px; }
   .option-btn { padding: 10px 12px; font-size: 14px; }
@@ -364,6 +383,7 @@ body {
   .controls { gap: 6px; }
   .score-panel { padding: 12px; }
   .score-item .score-value { font-size: 22px; }
+  .nav-float { margin: 0 -12px; padding: 8px 12px; }
 }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
@@ -392,11 +412,17 @@ body {
         <option value="">全部分類 (2689題)</option>
       </select>
       <input type="text" id="searchInput" placeholder="搜尋題目或選項..." oninput="debounceSearch()">
+      <select id="pageSizeSelect" onchange="changePageSize()">
+        <option value="10">每頁 10 題</option>
+        <option value="20">每頁 20 題</option>
+        <option value="30">每頁 30 題</option>
+        <option value="40">每頁 40 題</option>
+        <option value="50">每頁 50 題</option>
+      </select>
       <button class="btn" onclick="randomQuestion()">隨機</button>
     </div>
-    <div class="nav-bar" id="browseNav"></div>
     <div id="browseContent"></div>
-    <div class="nav-bar" id="browseNavBottom"></div>
+    <div class="nav-float" id="browseNavBottom"></div>
   </div>
 
   <!-- ===== Exam Mode ===== -->
@@ -426,9 +452,8 @@ body {
     <!-- Running exam -->
     <div id="examRunning" style="display:none;">
       <div class="score-panel" id="examScorePanel"></div>
-      <div class="nav-bar" id="examNav"></div>
       <div id="examContent"></div>
-      <div class="nav-bar" id="examNavBottom"></div>
+      <div class="nav-float" id="examNavBottom"></div>
     </div>
     <!-- Result screen -->
     <div id="examResult" style="display:none;"></div>
@@ -440,9 +465,8 @@ body {
       <button class="btn btn-danger" onclick="clearWrongQuestions()">清空錯題</button>
       <span id="wrongCount" style="font-size:14px;color:var(--text-secondary);display:flex;align-items:center;"></span>
     </div>
-    <div class="nav-bar" id="wrongNav"></div>
     <div id="wrongContent"></div>
-    <div class="nav-bar" id="wrongNavBottom"></div>
+    <div class="nav-float" id="wrongNavBottom"></div>
   </div>
 </main>
 
@@ -457,7 +481,8 @@ const ALL_QUESTIONS = [{"q":1,"s":"現代的品管作業基本觀念已進入","
 // ===== 狀態管理 =====
 let currentMode = 'browse';
 let filteredQuestions = [...ALL_QUESTIONS];
-let browseIndex = 0;
+let browsePage = 0;       // 目前頁碼（從 0 開始）
+let browsePageSize = 10;  // 每頁題數
 
 // 測驗狀態
 let examQuestions = [];
@@ -475,6 +500,7 @@ let searchTimer = null;
 document.addEventListener('DOMContentLoaded', () => {
   populateCategoryFilters();
   loadState();
+  document.getElementById('pageSizeSelect').value = browsePageSize;
   applyFilters();
 });
 
@@ -532,7 +558,8 @@ function loadState() {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
       const state = JSON.parse(saved);
-      browseIndex = state.browseIndex || 0;
+      browsePageSize = state.browsePageSize || 10;
+      browsePage = state.browsePage || 0;
       wrongSet = new Set(state.wrongIds || []);
       // 恢復測驗進度
       if (state.exam && state.exam.questions && state.exam.questions.length > 0) {
@@ -548,7 +575,8 @@ function loadState() {
 function saveState() {
   try {
     const state = {
-      browseIndex,
+      browsePage,
+      browsePageSize,
       wrongIds: [...wrongSet],
       exam: {
         questions: examQuestions,
@@ -590,7 +618,7 @@ function applyFilters() {
     return true;
   });
 
-  browseIndex = 0;
+  browsePage = 0;
   renderBrowse();
 }
 
@@ -599,39 +627,65 @@ function debounceSearch() {
   searchTimer = setTimeout(applyFilters, 300);
 }
 
+function changePageSize() {
+  browsePageSize = parseInt(document.getElementById('pageSizeSelect').value);
+  browsePage = 0;
+  saveState();
+  renderBrowse();
+}
+
 function renderBrowse() {
   if (filteredQuestions.length === 0) {
     document.getElementById('browseContent').innerHTML = '<div class="empty-state">找不到符合條件的題目</div>';
-    document.getElementById('browseNav').innerHTML = '';
     document.getElementById('browseNavBottom').innerHTML = '';
     return;
   }
-  if (browseIndex >= filteredQuestions.length) browseIndex = filteredQuestions.length - 1;
-  if (browseIndex < 0) browseIndex = 0;
 
-  const question = filteredQuestions[browseIndex];
-  document.getElementById('browseContent').innerHTML = renderQuestionCard(question, 'browse');
+  const totalPages = Math.ceil(filteredQuestions.length / browsePageSize);
+  if (browsePage >= totalPages) browsePage = totalPages - 1;
+  if (browsePage < 0) browsePage = 0;
 
-  const navHtml = buildNavHtml(browseIndex, filteredQuestions.length, 'browseTo');
-  document.getElementById('browseNav').innerHTML = navHtml;
+  // 取出本頁題目
+  const startIdx = browsePage * browsePageSize;
+  const endIdx = Math.min(startIdx + browsePageSize, filteredQuestions.length);
+  const pageQuestions = filteredQuestions.slice(startIdx, endIdx);
+
+  // 渲染多題（瀏覽模式直接顯示答案）
+  let html = '';
+  pageQuestions.forEach(q => {
+    html += renderQuestionCard(q, 'browse');
+  });
+  document.getElementById('browseContent').innerHTML = html;
+
+  // 分頁導航
+  const navHtml = buildPageNav(browsePage, totalPages, filteredQuestions.length, startIdx + 1, endIdx);
   document.getElementById('browseNavBottom').innerHTML = navHtml;
 
-  // 儲存瀏覽位置
-  browseIndex = browseIndex;
+  // 同步 select
+  document.getElementById('pageSizeSelect').value = browsePageSize;
   saveState();
 }
 
-function browseTo(delta) {
-  browseIndex += delta;
+function browseToPage(page) {
+  browsePage = page;
   renderBrowse();
   window.scrollTo({ top: 0, behavior: 'auto' });
 }
 
 function randomQuestion() {
   if (filteredQuestions.length === 0) return;
-  browseIndex = Math.floor(Math.random() * filteredQuestions.length);
+  const randIdx = Math.floor(Math.random() * filteredQuestions.length);
+  browsePage = Math.floor(randIdx / browsePageSize);
   renderBrowse();
   window.scrollTo({ top: 0, behavior: 'auto' });
+}
+
+/** 分頁導航 HTML（頁碼版） */
+function buildPageNav(currentPage, totalPages, totalItems, fromNum, toNum) {
+  let html = '<button class="btn" onclick="browseToPage(' + (currentPage - 1) + ')"' + (currentPage === 0 ? ' disabled' : '') + '>← 上一頁</button>';
+  html += '<span class="page-info">第 ' + fromNum + '-' + toNum + ' 題 / 共 ' + totalItems + ' 題（頁 ' + (currentPage + 1) + '/' + totalPages + '）</span>';
+  html += '<button class="btn" onclick="browseToPage(' + (currentPage + 1) + ')"' + (currentPage >= totalPages - 1 ? ' disabled' : '') + '>下一頁 →</button>';
+  return html;
 }
 
 /* ==========================================================
@@ -704,7 +758,6 @@ function renderExamQuestion() {
 
   // Nav
   const navHtml = buildExamNav();
-  document.getElementById('examNav').innerHTML = navHtml;
   document.getElementById('examNavBottom').innerHTML = navHtml;
 }
 
@@ -788,7 +841,6 @@ function renderWrong() {
 
   if (wrongQuestions.length === 0) {
     document.getElementById('wrongContent').innerHTML = '<div class="empty-state">目前沒有錯題紀錄</div>';
-    document.getElementById('wrongNav').innerHTML = '';
     document.getElementById('wrongNavBottom').innerHTML = '';
     return;
   }
@@ -797,7 +849,6 @@ function renderWrong() {
 
   document.getElementById('wrongContent').innerHTML = renderQuestionCard(wrongQuestions[wrongIndex], 'wrong');
   const navHtml = buildNavHtml(wrongIndex, wrongQuestions.length, 'wrongTo');
-  document.getElementById('wrongNav').innerHTML = navHtml;
   document.getElementById('wrongNavBottom').innerHTML = navHtml;
 }
 
@@ -840,9 +891,10 @@ function renderQuestionCard(question, context) {
     const isSelected = userAnswer === opt.key;
 
     if (context === 'browse' || context === 'wrong') {
-      // 瀏覽/錯題模式：點擊後翻牌（用 data attribute 控制）
-      cls += ' browse-option';
-      html += '<button class="' + cls + '" data-qid="' + qId + '" data-key="' + opt.key + '" data-ans="' + question.ans + '" onclick="revealBrowseAnswer(this)">';
+      // 瀏覽/錯題模式：直接標示正確答案
+      if (isCorrect) cls += ' correct';
+      cls += ' disabled';
+      html += '<button class="' + cls + '">';
     } else {
       // 測驗模式
       if (isRevealed) {
@@ -856,16 +908,13 @@ function renderQuestionCard(question, context) {
     }
 
     html += '<span class="option-label">' + opt.key + '</span>';
-    html += '<span>' + escapeHtml(opt.text) + '</span>';
+    html += '<span>' + escapeHtml(trimTrailing(opt.text)) + '</span>';
     html += '</button>';
   });
 
   html += '</div>';
 
-  // 瀏覽/錯題模式答案區（初始隱藏）
-  if (context === 'browse' || context === 'wrong') {
-    html += '<div class="answer-reveal correct-msg" id="answer-' + qId + '" style="display:none;">正確答案：' + question.ans + '</div>';
-  }
+  html += '</div>';
 
   // 測驗模式答案反饋
   if (context === 'exam' && isRevealed) {
@@ -878,32 +927,6 @@ function renderQuestionCard(question, context) {
 
   html += '</div>';
   return html;
-}
-
-/** 瀏覽模式點選選項翻牌 */
-function revealBrowseAnswer(btn) {
-  const qid = btn.dataset.qid;
-  const key = btn.dataset.key;
-  const ans = btn.dataset.ans;
-
-  // 標記所有同題選項
-  const siblings = btn.parentElement.querySelectorAll('.option-btn');
-  siblings.forEach(s => {
-    s.classList.add('disabled');
-    s.onclick = null;
-    if (s.dataset.key === ans) s.classList.add('correct');
-    if (s === btn && key !== ans) s.classList.add('wrong');
-  });
-
-  // 顯示答案
-  const reveal = document.getElementById('answer-' + qid);
-  if (reveal) reveal.style.display = '';
-
-  // 如果答錯，加入錯題
-  if (key !== ans) {
-    wrongSet.add(parseInt(qid));
-    saveState();
-  }
 }
 
 /** 測驗模式選擇答案 */
@@ -929,7 +952,6 @@ function selectExamAnswer(qId, key) {
   } else {
     // 最後一題，更新 nav 顯示交卷按鈕
     const navHtml = buildExamNav();
-    document.getElementById('examNav').innerHTML = navHtml;
     document.getElementById('examNavBottom').innerHTML = navHtml;
   }
 }
@@ -962,6 +984,12 @@ function buildNavHtml(index, total, fnName) {
 function escapeHtml(str) {
   if (!str) return '';
   return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+/** 移除選項文字尾部的逗號、句號等多餘標點 */
+function trimTrailing(str) {
+  if (!str) return '';
+  return str.replace(/[，,、。；\s]+$/g, '');
 }
 </script>
 </body>
